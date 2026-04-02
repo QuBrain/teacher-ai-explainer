@@ -12,7 +12,7 @@ export default function App() {
   const [socket, setSocket] = useState(null);
   const [input, setInput] = useState("");
   const [isThinking, setIsThinking] = useState(false);
-  // const [history, setHistory] = useState([]);
+  const [history, setHistory] = useState([]);
   
 
   // 1. Physics Engine
@@ -92,7 +92,17 @@ export default function App() {
     }, [setNodes, setEdges]);
 
   const handleSend = () => {
-    if (socket?.readyState === WebSocket.OPEN && input.trim()) {
+    if (socket && socket.readyState === WebSocket.OPEN && input.trim() !== "") {
+      // 1. Create a message object
+      const newMessage = {
+        text: input,
+        id: Date.now(), // Unique ID for React keys
+      };
+  
+      // 2. Add it to our history array
+      setHistory((prev) => [newMessage, ...prev]); 
+  
+      // 3. Send to Professor and clear
       setIsThinking(true);
       socket.send(input);
       setInput("");
@@ -105,6 +115,48 @@ export default function App() {
         <Background variant="dots" gap={20} color="#e2e8f0" />
         <Controls />
       </ReactFlow>
+      
+      {/* History Sidebar */}
+      <div style={{
+        position: 'absolute',
+        left: '20px',
+        top: '20px',
+        width: '280px',
+        maxHeight: '70vh',
+        background: 'rgba(255, 255, 255, 0.8)',
+        backdropFilter: 'blur(10px)',
+        borderRadius: '16px',
+        padding: '20px',
+        boxShadow: '0 10px 15px -3px rgba(0, 0, 0, 0.1)',
+        border: '1px solid rgba(226, 232, 240, 0.8)',
+        zIndex: 1000,
+        overflowY: 'auto',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: '12px'
+      }}>
+        <div style={{ fontSize: '12px', fontWeight: '800', color: '#94a3b8', textTransform: 'uppercase', letterSpacing: '1px' }}>
+          Conversation History
+        </div>
+        
+        {history.length === 0 && (
+          <div style={{ fontSize: '13px', color: '#cbd5e1', fontStyle: 'italic' }}>No prompts yet...</div>
+        )}
+      
+        {history.map((item) => (
+          <div key={item.id} style={{
+            padding: '12px',
+            background: 'white',
+            borderRadius: '8px',
+            fontSize: '14px',
+            color: '#1e293b',
+            border: '1px solid #f1f5f9',
+            lineHeight: '1.4'
+          }}>
+            {item.text}
+          </div>
+        ))}
+      </div>
 
       {/* Thinking Indicator */}
       {isThinking && (
