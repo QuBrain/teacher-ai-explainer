@@ -8,7 +8,7 @@ import {
   Controls,
   MarkerType,
 } from "@xyflow/react";
-import { forceSimulation, forceManyBody, forceCollide } from "d3-force";
+import { forceSimulation, forceManyBody, forceCollide, forceX, forceY, forceLink } from "d3-force";
 import MathNode from "./MathNode";
 import "@xyflow/react/dist/style.css";
 
@@ -35,25 +35,26 @@ export default function App() {
   // 1. PHYSICS ENGINE: Low energy, high friction for sequential stability
   useEffect(() => {
     if (nodes.length === 0) return;
-
+  
     const sim = forceSimulation(nodes)
-      .force("charge", forceManyBody().strength(-100)) // Minimal push
-      .force("collision", forceCollide().radius(250)) // Only prevent overlaps
-      // REMOVE all other forces (Center, X, Y, Link)
-      .velocityDecay(0.9) // Near-instant stop
-      .alpha(0.1)
+      .force("charge", forceManyBody().strength(-150)) // Light repulsion
+      .force("collision", forceCollide().radius(300)) // Prevent overlaps
+      // --- THE FIX: Constrain to a horizontal line ---
+      .force("y", forceY(window.innerHeight / 2).strength(0.1)) 
+      .force("x", forceX(window.innerWidth / 2).strength(0.02))
+      .velocityDecay(0.6) 
+      .alpha(0.1) 
       .on("tick", () => {
         setNodes((nds) =>
           nds.map((node) => ({
             ...node,
-            // Force the coordinates to be exactly what D3 says
             position: { x: node.x, y: node.y },
-          })),
+          }))
         );
       });
-
+  
     return () => sim.stop();
-  }, [nodes.length]); // ONLY run when nodes are added
+  }, [nodes.length]);
 
   // 2. WebSocket Connection & Waterfall Spawning
   useEffect(() => {
@@ -64,27 +65,21 @@ export default function App() {
       setIsThinking(false);
       const data = JSON.parse(event.data);
       const currentPromptId = activeIdRef.current;
-      const cleanMath = data.content
-        ? String(data.content).replace(/\\\\/g, "\\")
-        : "";
-
+      const cleanMath = data.content ? String(data.content).replace(/\\\\/g, "\\") : "";
+    
+      // Inside ws.onmessage
       setNodes((nds) => {
-        const parentNode = nds.find(
-          (n) => String(n.id) === String(data.parent_id),
-        );
-
-        // Calculate exact coordinates
-        const targetX = parentNode
-          ? parentNode.position.x
-          : window.innerWidth / 2;
-        const targetY = parentNode ? parentNode.position.y + 350 : 100;
-
+        const parentNode = nds.find((n) => String(n.id) === String(data.parent_id));
+        
+        // 450px to the right of the parent
+        const targetX = parentNode ? parentNode.position.x + 650 : 100;
+        const targetY = parentNode ? parentNode.position.y : window.innerHeight / 2;
+      
         const newNode = {
           id: String(data.id),
           type: "mathNode",
-          // We set both 'position' and the D3 'x/y' to the same values
           position: { x: targetX, y: targetY },
-          x: targetX,
+          x: targetX, // Sync D3 coordinates
           y: targetY,
           data: {
             label: data.label,
@@ -93,23 +88,22 @@ export default function App() {
             promptId: currentPromptId,
           },
         };
-
+      
         return nds.concat(newNode);
       });
-
-      // Edge Logic
+    
+      // Edge Logic (Keep 'straight' for clarity)
       if (data.parent_id) {
-        const edge = {
+        setEdges((eds) => addEdge({
           id: `e-${data.parent_id}-${data.id}`,
           source: String(data.parent_id),
           target: String(data.id),
-          type: "straight", // FORCE STRAIGHT LINES
+          type: "straight",
           animated: true,
           style: { stroke: "#3b82f6", strokeWidth: 3 },
           markerEnd: { type: MarkerType.ArrowClosed, color: "#3b82f6" },
           data: { promptId: currentPromptId },
-        };
-        setEdges((eds) => addEdge(edge, eds));
+        }, eds));
       }
     };
 
@@ -145,7 +139,13 @@ export default function App() {
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
         defaultEdgeOptions={defaultEdgeOptions}
+        // --- CONSTRAINTS ---
+        minZoom={0.2}
+        maxZoom={1.5}
+        // Prevents dragging nodes/board too far away
+        translateExtent={[[-1000, -1000], [5000, 5000]]} 
         fitView
+        fitViewOptions={{ padding: 0.2, duration: 1000, includeHiddenNodes:false }}
       >
         <Background variant="dots" gap={20} color="#e2e8f0" />
         <Controls />
