@@ -2,6 +2,9 @@ import 'katex/dist/katex.min.css';
 import React from 'react';
 import { Handle, Position } from '@xyflow/react';
 import { BlockMath } from 'react-katex';
+import ReactMarkdown from 'react-markdown'
+import remarkMath from 'remark-math';
+import rehypeKatex from 'rehype-katex';
 
 
 const MathNode = ({ data }) => {
@@ -33,7 +36,16 @@ const MathNode = ({ data }) => {
         <span style={{ fontSize: '10px', color: '#94a3b8' }}>{data.label}</span>
       </div>
       <div style={{ background: 'white', padding: '12px', borderRadius: '6px', border: '1px solid #e2e8f0', overflowX: 'auto' }}>
-        <BlockMath math={data.math || ''} />
+        <ReactMarkdown 
+            remarkPlugins={[remarkMath]} 
+            rehypePlugins={[rehypeKatex]}
+            components={{
+              // This ensures the math doesn't have weird margins
+              p: ({node, ...props}) => <p style={{ margin: 0, fontSize: '14px', lineHeight: '1.5', color: '#1e293b' }} {...props} />,
+            }}
+          >
+            {data.math}
+          </ReactMarkdown>
       </div>
       <Handle type="source" position={Position.Bottom} style={{ background: '#94a3b8' }} />
     </div>

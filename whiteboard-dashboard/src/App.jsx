@@ -12,31 +12,30 @@ export default function App() {
   const [socket, setSocket] = useState(null);
   const [input, setInput] = useState("");
   const [isThinking, setIsThinking] = useState(false);
+  // const [history, setHistory] = useState([]);
+  
 
   // 1. Physics Engine
   useEffect(() => {
-      if (nodes.length === 0) return;
+    if (nodes.length === 0) return;
   
-      // 1. Create the simulation with the CURRENT nodes
-      const sim = forceSimulation(nodes)
-        .force("charge", forceManyBody().strength(-8000)) // Massive repulsion
-        .force("link", forceLink(edges).id((d) => d.id).distance(350)) // Long springs
-        .force("center", forceCenter(window.innerWidth / 2, window.innerHeight / 2))
-        .force("collision", forceCollide().radius(280)) // Big 'personal bubble' for nodes
-        .velocityDecay(0.3) // Lower friction so they slide further
-        .alpha(1) // High energy start
-        .restart() 
-        .on("tick", () => {
-          // 2. CRITICAL: Functional update to sync D3 positions to React Flow
-          setNodes((nds) => nds.map((node) => ({ 
-              ...node,
-              position: { x: node.x, y: node.y } // Explicitly map D3's x/y to React Flow's position
-          })));
-        });
+    const sim = forceSimulation(nodes)
+      .force("charge", forceManyBody().strength(-5000))
+      .force("link", forceLink(edges).id(d => d.id).distance(200))
+      .force("center", forceCenter(window.innerWidth / 2, window.innerHeight / 2))
+      .force("collision", forceCollide().radius(200))
+      .velocityDecay(0.2) // Increased friction to stop the "shaking"
+      .alpha(0.5) // Start with less "explosion" energy
+      .on("tick", () => {
+        setNodes((nds) => nds.map(node => ({
+          ...node,
+          // This ensures the node's visual position stays synced with D3 math
+          position: { x: node.x, y: node.y } 
+        })));
+      });
   
-      return () => sim.stop();
-      // 3. Dependency: Re-run every time the number of nodes or edges changes
-    }, [nodes.length, edges.length]);
+    return () => sim.stop();
+  }, [nodes.length, edges.length]);
   
   // 2. WebSocket
   // 2. WebSocket Connection
@@ -60,8 +59,8 @@ export default function App() {
           type: "mathNode",
           // Spawning slightly off-center helps the physics "push" them apart
           position: { 
-            x: window.innerWidth / 2 + (Math.random() - 0.5) * 400, 
-            y: window.innerHeight / 2 + (Math.random() - 0.5) * 400 
+            x: window.innerWidth / 2 + (Math.random() - 1.0) * 400, 
+            y: window.innerHeight / 2 + (Math.random() - 1.0) * 400 
           },
           data: {
             label: data.label,
@@ -109,7 +108,7 @@ export default function App() {
 
       {/* Thinking Indicator */}
       {isThinking && (
-        <div style={{ position: 'absolute', bottom: '130px', left: '50%', transform: 'translateX(-50%)', background: 'white', padding: '10px 25px', borderRadius: '20px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', zIndex: 1000, display: 'flex', alignItems: 'center', gap: '10px' }}>
+        <div style={{ position: 'absolute', bottom: '300px', left: '50%', transform: 'translateX(-50%)', background: 'white', padding: '10px 25px', borderRadius: '20px', boxShadow: '0 4px 12px rgba(0,0,0,0.1)', zIndex: 1000, display: 'flex', alignItems: 'center', gap: '10px' }}>
           <div className="spinner" /> 
           <span style={{ fontSize: '14px', fontWeight: '600', color: '#64748b' }}>Professor is thinking...</span>
         </div>
