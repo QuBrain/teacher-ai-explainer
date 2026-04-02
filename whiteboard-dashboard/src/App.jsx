@@ -23,6 +23,7 @@ export default function App() {
   const [history, setHistory] = useState([]);
   const [activePromptId, setActivePromptId] = useState(null);
   const activeIdRef = useRef(null);
+  
 
   const defaultEdgeOptions = {
     type: "striaght",
@@ -40,7 +41,7 @@ export default function App() {
       .force("charge", forceManyBody().strength(-150)) // Light repulsion
       .force("collision", forceCollide().radius(300)) // Prevent overlaps
       // --- THE FIX: Constrain to a horizontal line ---
-      .force("y", forceY(window.innerHeight / 2).strength(0.1)) 
+      .force("y", forceY(window.innerHeight / 2).strength(0.8)) 
       .force("x", forceX(window.innerWidth / 2).strength(0.02))
       .velocityDecay(0.6) 
       .alpha(0.1) 
@@ -72,7 +73,7 @@ export default function App() {
         const parentNode = nds.find((n) => String(n.id) === String(data.parent_id));
         
         // 450px to the right of the parent
-        const targetX = parentNode ? parentNode.position.x + 650 : 100;
+        const targetX = parentNode ? parentNode.position.x + 550 : 100;
         const targetY = parentNode ? parentNode.position.y : window.innerHeight / 2;
       
         const newNode = {
@@ -144,7 +145,7 @@ export default function App() {
         maxZoom={1.5}
         // Prevents dragging nodes/board too far away
         translateExtent={[[-1000, -1000], [5000, 5000]]} 
-        fitView
+        fitView={false}
         fitViewOptions={{ padding: 0.2, duration: 1000, includeHiddenNodes:false }}
       >
         <Background variant="dots" gap={20} color="#e2e8f0" />
