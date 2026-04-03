@@ -32,7 +32,10 @@ function FlowBoard() {
   // Progress Calculations
   const currentNodes = nodes.filter((n) => n.data.promptId === activePromptId);
   const nodeCount = currentNodes.length;
-  const progressPercentage = Math.min((nodeCount / 10) * 100, 100);
+  const hasFinalAnswer = currentNodes.some(n => n.data.type === 'FINAL ANSWER');
+  const progressPercentage = hasFinalAnswer 
+    ? 100 
+    : Math.min((nodeCount / (nodeCount + 2)) * 100, 95);
 
   // --- Navigation Logic ---
   const handleJumpToStep = (nodeId) => {
