@@ -26,6 +26,9 @@ function FlowBoard() {
   const [activePromptId, setActivePromptId] = useState(null);
   const activeIdRef = useRef(null);
   const socketRef = useRef(null);
+  const serviceurl = "https://professor-backend-656601378878.us-central1.run.app/";
+  
+  
 
   const { setCenter } = useReactFlow();
 
@@ -88,7 +91,7 @@ function FlowBoard() {
 
   // 2. WebSocket
   useEffect(() => {
-    const ws = new WebSocket("ws://localhost:8000/ws/reason");
+    const ws = new WebSocket(`wss://${serviceurl}/ws/reason`);
     socketRef.current = ws;
     setSocket(ws);
 

@@ -3,9 +3,30 @@ import json
 from fastapi import FastAPI, WebSocket
 from google import genai
 from google.genai import types
+from fastapi.middleware.cors import CORSMiddleware
+import os
 
 app = FastAPI()
-client = genai.Client()
+origins = [
+    "http://localhost:5173",
+    "https://cs598-project-492002.web.app",
+    "https://cs598-project-492002.firebaseapp.com"
+]
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=origins, # For a prototype, "*" is fine. For production, use your Vercel/Firebase URL.
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
+)
+
+project_id=os.environ.get("GOOGLE_CLOUD_PROJECT")
+location_id=os.environ.get("GOOGLE_CLOUD_LOCATION","us-central1")
+
+if project_id and location_id:
+    client = genai.Client(vertexai=True,project=project_id,location=location_id)
+else:
+    raise ValueError
 
 node_tool = types.Tool(
     function_declarations=[
@@ -41,7 +62,7 @@ async def health():
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
 
-    with open("../System_Prompt.md", "r") as f:
+    with open("System_Prompt.md", "r") as f:
         sys_inst = f.read()
 
     try:
