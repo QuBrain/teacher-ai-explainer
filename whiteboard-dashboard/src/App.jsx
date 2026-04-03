@@ -1,4 +1,4 @@
-import React, { useEffect, useState, useRef, useCallback } from "react";
+import React, { useEffect, useState, useRef } from "react";
 import {
   ReactFlow,
   useNodesState,
@@ -16,7 +16,6 @@ import "@xyflow/react/dist/style.css";
 
 const nodeTypes = { mathNode: MathNode };
 
-// We define the internal content separately so we can use hooks like useReactFlow
 function FlowBoard() {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -26,18 +25,17 @@ function FlowBoard() {
   const [history, setHistory] = useState([]);
   const [activePromptId, setActivePromptId] = useState(null);
   const activeIdRef = useRef(null);
+  const socketRef = useRef(null);
 
   const { setCenter } = useReactFlow();
 
-  // Progress Calculations
   const currentNodes = nodes.filter((n) => n.data.promptId === activePromptId);
   const nodeCount = currentNodes.length;
-  const hasFinalAnswer = currentNodes.some(n => n.data.type === 'FINAL ANSWER');
-  const progressPercentage = hasFinalAnswer 
-    ? 100 
+  const hasFinalAnswer = currentNodes.some((n) => n.data.type === 'FINAL ANSWER');
+  const progressPercentage = hasFinalAnswer
+    ? 100
     : Math.min((nodeCount / (nodeCount + 2)) * 100, 95);
 
-  // --- Navigation Logic ---
   const handleJumpToStep = (nodeId) => {
     if (!nodeId) return;
     const targetNode = nodes.find((n) => n.id === nodeId);
@@ -46,10 +44,29 @@ function FlowBoard() {
     }
   };
 
-  const defaultEdgeOptions = {
-    type: "straight",
-    markerEnd: { type: MarkerType.ArrowClosed, color: "#3b82f6" },
-  };
+  // Stable ref so probe callbacks never go stale inside node data
+  const handleProbe = useRef((nodeId, nodeContent) => {
+    const ws = socketRef.current;
+    if (ws?.readyState === WebSocket.OPEN) {
+      setIsThinking(true);
+      ws.send(JSON.stringify({ type: "probe", parent_id: nodeId, content: nodeContent }));
+    }
+  });
+
+  const makeNode = (data, position, promptId) => ({
+    id: String(data.id),
+    type: "mathNode",
+    position,
+    x: position.x,
+    y: position.y,
+    data: {
+      label: data.label,
+      math: data.content || "",
+      type: data.node_type,
+      promptId,
+      onProbe: (nodeId, nodeContent) => handleProbe.current(nodeId, nodeContent),
+    },
+  });
 
   // 1. Physics Engine
   useEffect(() => {
@@ -63,98 +80,80 @@ function FlowBoard() {
       .alpha(0.1)
       .on("tick", () => {
         setNodes((nds) =>
-          nds.map((node) => ({
-            ...node,
-            position: { x: node.x, y: node.y },
-          }))
+          nds.map((node) => ({ ...node, position: { x: node.x, y: node.y } }))
         );
       });
     return () => sim.stop();
   }, [nodes.length, setNodes]);
 
-  // 2. WebSocket Logic
+  // 2. WebSocket
   useEffect(() => {
     const ws = new WebSocket("ws://localhost:8000/ws/reason");
+    socketRef.current = ws;
     setSocket(ws);
+
     ws.onmessage = (event) => {
       setIsThinking(false);
       const data = JSON.parse(event.data);
       const currentPromptId = activeIdRef.current;
-      const cleanMath = data.content ? String(data.content).replace(/\\\\/g, "\\") : "";
 
       setNodes((nds) => {
         const parentNode = nds.find((n) => String(n.id) === String(data.parent_id));
-        const targetX = parentNode ? parentNode.position.x + 550 : 100;
-        const targetY = parentNode ? parentNode.position.y : window.innerHeight / 2;
-
-        const newNode = {
-          id: String(data.id),
-          type: "mathNode",
-          position: { x: targetX, y: targetY },
-          x: targetX,
-          y: targetY,
-          data: { label: data.label, math: cleanMath, type: data.node_type, promptId: currentPromptId },
+        const isAlternative = data.node_type === 'Alternative';
+        const position = {
+          x: parentNode ? parentNode.position.x + (isAlternative ? 0 : 550) : 100,
+          y: parentNode ? parentNode.position.y + (isAlternative ? 220 : 0) : window.innerHeight / 2,
         };
-        return nds.concat(newNode);
+        return nds.concat(makeNode(data, position, currentPromptId));
       });
 
       if (data.parent_id) {
-        setEdges((eds) => addEdge({
-          id: `e-${data.parent_id}-${data.id}`,
-          source: String(data.parent_id),
-          target: String(data.id),
-          type: "straight",
-          animated: true,
-          style: { stroke: "#3b82f6", strokeWidth: 3 },
-          markerEnd: { type: MarkerType.ArrowClosed, color: "#3b82f6" },
-          data: { promptId: currentPromptId },
-        }, eds));
+        setEdges((eds) =>
+          addEdge({
+            id: `e-${data.parent_id}-${data.id}`,
+            source: String(data.parent_id),
+            target: String(data.id),
+            type: "straight",
+            animated: true,
+            style: { stroke: "#3b82f6", strokeWidth: 3 },
+            markerEnd: { type: MarkerType.ArrowClosed, color: "#3b82f6" },
+            data: { promptId: activeIdRef.current },
+          }, eds)
+        );
       }
     };
+
     return () => ws.close();
   }, [setNodes, setEdges]);
 
   const handleSend = () => {
-    if (socket?.readyState === WebSocket.OPEN && input.trim()) {
+    const ws = socketRef.current;
+    if (ws?.readyState === WebSocket.OPEN && input.trim()) {
       const newId = Date.now();
       activeIdRef.current = newId;
       setHistory((prev) => [{ text: input, id: newId }, ...prev]);
       setActivePromptId(newId);
       setIsThinking(true);
-      socket.send(input);
+      ws.send(input);
       setInput("");
     }
   };
 
   return (
     <div style={{ width: "100vw", height: "100vh", background: "#f8fafc", overflow: "hidden" }}>
-      
+
       {/* Progress Bar */}
       <div style={{ position: 'absolute', top: 0, left: 0, width: '100%', height: '6px', background: '#e2e8f0', zIndex: 10001 }}>
         <div style={{ width: `${progressPercentage}%`, height: '100%', background: 'linear-gradient(90deg, #3b82f6, #10b981)', transition: 'width 0.8s ease-in-out' }} />
       </div>
 
-      {/* NEW Dropdown HUD (Replaces static Step counter) */}
-      <div style={{
-        position: 'absolute', top: '12px', right: '24px', zIndex: 10002,
-        background: 'white', padding: '6px 12px', borderRadius: '12px',
-        border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.05)',
-        display: 'flex', alignItems: 'center', gap: '10px'
-      }}>
+      {/* Dropdown HUD */}
+      <div style={{ position: 'absolute', top: '12px', right: '24px', zIndex: 10002, background: 'white', padding: '6px 12px', borderRadius: '12px', border: '1px solid #e2e8f0', boxShadow: '0 4px 6px rgba(0,0,0,0.05)', display: 'flex', alignItems: 'center', gap: '10px' }}>
         <span style={{ fontSize: '12px', fontWeight: 'bold', color: '#64748b' }}>GO TO:</span>
-        <select 
-          onChange={(e) => handleJumpToStep(e.target.value)}
-          style={{
-            border: 'none', background: '#f1f5f9', borderRadius: '6px',
-            padding: '4px 8px', fontSize: '12px', fontWeight: 'bold', 
-            color: '#1e293b', outline: 'none', cursor: 'pointer'
-          }}
-        >
+        <select onChange={(e) => handleJumpToStep(e.target.value)} style={{ border: 'none', background: '#f1f5f9', borderRadius: '6px', padding: '4px 8px', fontSize: '12px', fontWeight: 'bold', color: '#1e293b', outline: 'none', cursor: 'pointer' }}>
           <option value="">Step {nodeCount}</option>
           {currentNodes.map((node, index) => (
-            <option key={node.id} value={node.id}>
-              {index + 1}: {node.data.type || 'Logic'}
-            </option>
+            <option key={node.id} value={node.id}>{index + 1}: {node.data.type || 'Logic'}</option>
           ))}
         </select>
       </div>
@@ -165,10 +164,9 @@ function FlowBoard() {
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
-        defaultEdgeOptions={defaultEdgeOptions}
         minZoom={0.2}
         maxZoom={1.5}
-        translateExtent={[[-1000, -1000], [5000, 5000]]} 
+        translateExtent={[[-1000, -1000], [5000, 5000]]}
         fitView={false}
       >
         <Background variant="dots" gap={20} color="#e2e8f0" />
@@ -176,7 +174,7 @@ function FlowBoard() {
       </ReactFlow>
 
       {/* History Sidebar */}
-      <div style={{ position: "absolute", left: "20px", top: "20px", width: "280px", maxHeight: "70vh", background: "rgba(255, 255, 255, 0.9)", backdropFilter: "blur(10px)", borderRadius: "16px", padding: "20px", boxShadow: "0 10px 15px rgba(0, 0, 0, 0.1)", border: "1px solid rgba(226, 232, 240, 0.8)", zIndex: 10000, overflowY: "auto", display: "flex", flexDirection: "column", gap: "12px" }}>
+      <div style={{ position: "absolute", left: "20px", top: "20px", width: "280px", maxHeight: "70vh", background: "rgba(255,255,255,0.9)", backdropFilter: "blur(10px)", borderRadius: "16px", padding: "20px", boxShadow: "0 10px 15px rgba(0,0,0,0.1)", border: "1px solid rgba(226,232,240,0.8)", zIndex: 10000, overflowY: "auto", display: "flex", flexDirection: "column", gap: "12px" }}>
         <div style={{ fontSize: "11px", fontWeight: "800", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "1px" }}>Conversation History</div>
         {history.map((item) => (
           <div key={item.id} onClick={() => { setActivePromptId(item.id); activeIdRef.current = item.id; }} style={{ padding: "12px", borderRadius: "8px", fontSize: "14px", cursor: "pointer", background: activePromptId === item.id ? "#eff6ff" : "white", border: activePromptId === item.id ? "2px solid #3b82f6" : "1px solid #f1f5f9" }}>
@@ -185,7 +183,7 @@ function FlowBoard() {
         ))}
       </div>
 
-      {/* Professor Thinking Status */}
+      {/* Thinking Status */}
       {isThinking && (
         <div style={{ position: "absolute", bottom: "140px", left: "50%", transform: "translateX(-50%)", background: "white", padding: "12px 24px", borderRadius: "24px", boxShadow: "0 4px 12px rgba(0,0,0,0.1)", zIndex: 20000, display: "flex", alignItems: "center", gap: "10px" }}>
           <div className="spinner" />
@@ -193,7 +191,7 @@ function FlowBoard() {
         </div>
       )}
 
-      {/* Input Overlay */}
+      {/* Input */}
       <div style={{ position: "absolute", bottom: "40px", left: "50%", transform: "translateX(-50%)", zIndex: 1000, display: "flex", gap: "12px", background: "white", padding: "20px", borderRadius: "16px", boxShadow: "0 20px 25px rgba(0,0,0,0.1)", border: "1px solid #e2e8f0" }}>
         <input type="text" value={input} onChange={(e) => setInput(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleSend()} placeholder="Ask a STEM problem..." style={{ width: "500px", padding: "12px", borderRadius: "8px", border: "1px solid #cbd5e1", color: "#0f172a" }} />
         <button onClick={handleSend} style={{ padding: "12px 24px", backgroundColor: "#059669", color: "white", borderRadius: "8px", border: "none", fontWeight: "bold", cursor: "pointer" }}>Teach Me</button>
@@ -202,7 +200,6 @@ function FlowBoard() {
   );
 }
 
-// Wrapper to provide ReactFlow context
 export default function App() {
   return (
     <ReactFlowProvider>

@@ -1,6 +1,5 @@
 import asyncio
 import json
-
 from fastapi import FastAPI, WebSocket
 from google import genai
 from google.genai import types
@@ -8,7 +7,6 @@ from google.genai import types
 app = FastAPI()
 client = genai.Client()
 
-# The Schema that defines our Engineering Whiteboard "Language"
 node_tool = types.Tool(
     function_declarations=[
         types.FunctionDeclaration(
@@ -17,15 +15,13 @@ node_tool = types.Tool(
             parameters=types.Schema(
                 type="OBJECT",
                 properties={
-                    "id": types.Schema(type="STRING"),
-                    "label": types.Schema(type="STRING"),
-                    "content": types.Schema(type="STRING", description="LaTeX math content."),
+                    "id":        types.Schema(type="STRING"),
+                    "label":     types.Schema(type="STRING"),
+                    "content":   types.Schema(type="STRING", description="LaTeX math content."),
                     "node_type": types.Schema(
                         type="STRING",
-                        enum=[
-                            "Given", "Objective", "Principle", "Derivation", 
-                            "Self-Correction", "Alternative", "Final Answer"
-                        ],
+                        enum=["Given", "Objective", "Principle", "Derivation",
+                              "Self-Correction", "Alternative", "Final Answer"],
                     ),
                     "parent_id": types.Schema(type="STRING"),
                 },
@@ -44,51 +40,72 @@ async def health():
 @app.websocket("/ws/reason")
 async def websocket_endpoint(websocket: WebSocket):
     await websocket.accept()
+
     with open("../System_Prompt.md", "r") as f:
         sys_inst = f.read()
 
     try:
         while True:
-            student_query = await websocket.receive_text()
-            
-            # 1. Initialize a fresh chat session for each query
+            raw = await websocket.receive_text()
+
+            # --- Route: probe vs regular query ---
+            try:
+                msg = json.loads(raw)
+                is_probe = msg.get("type") == "probe"
+            except (json.JSONDecodeError, AttributeError):
+                msg = None
+                is_probe = False
+
+            if is_probe:
+                parent_id = msg["parent_id"]
+                node_content = msg["content"]
+                student_query = (
+                    f"A student is confused about this specific step on the whiteboard:\n\n"
+                    f"{node_content}\n\n"
+                    f"Explain this step in a different way using a single Alternative node. "
+                    f"You MUST set node_type to 'Alternative' and parent_id to '{parent_id}'. "
+                    f"Do not add any other nodes."
+                )
+            else:
+                student_query = raw
+
+            # --- Fresh chat session per query/probe ---
             chat = client.chats.create(
                 model='gemini-2.5-pro',
                 config=types.GenerateContentConfig(
-                    system_instruction=sys_inst, 
-                    tools=[node_tool], 
+                    system_instruction=sys_inst,
+                    tools=[node_tool],
                     temperature=0.1
                 )
             )
 
-            # 2. Send the initial query
             response = chat.send_message(student_query)
 
-            # 3. Enter a loop to handle multiple tool calls (The "Chain")
             while True:
-                # Track if any tools were called in this turn
                 found_tool_call = False
-                
+
                 for part in response.candidates[0].content.parts:
                     if part.function_call:
                         found_tool_call = True
-                        node_data = part.function_call.args
-                        
-                        # Push to React
-                        await asyncio.sleep(1.2) # Better pacing for the "vibe"
-                        await websocket.send_json(node_data)
-                        print(f"Node sent: {node_data.get('label')}")
+                        node_data = dict(part.function_call.args)
 
-                        # 4. CRITICAL: Feedback to the model
-                        # We send a "Success" response so it knows to move to the next step
+                        # For probes, force the correct parent_id and type
+                        # in case the model ignores the instruction
+                        if is_probe:
+                            node_data["node_type"] = "Alternative"
+                            node_data["parent_id"] = parent_id
+
+                        await asyncio.sleep(1.2)
+                        await websocket.send_json(node_data)
+                        print(f"Node sent: {node_data.get('label')} [{node_data.get('node_type')}]")
+
                         response = chat.send_message(
                             types.Part.from_function_response(
                                 name="add_reasoning_node",
                                 response={"status": "success", "message": "Node rendered on whiteboard"}
                             )
                         )
-                
-                # If no more tool calls were generated, the derivation is finished
+
                 if not found_tool_call:
                     break
 
