@@ -29,7 +29,7 @@ ruff check .                       # lint backend
 
 ### CI/CD
 GitHub Actions workflows in `.github/workflows/`:
-- `ci.yml` — runs on push/PR to main: lint (ruff + eslint), test (pytest), build (vite)
+- `ci.yml` — runs on push/PR to main: lint (ruff + eslint), type check (tsc), test (pytest), build (vite)
 - `audit.yml` — weekly security audit (pip-audit, npm audit, bandit, truffleHog)
 
 ## Critical gotchas
