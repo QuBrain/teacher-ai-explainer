@@ -1,0 +1,5 @@
+# Force Linguist to recognize TS/TSX and ignore residual configs/bundles
+*.ts linguist-language=TypeScript
+*.tsx linguist-language=TypeScript
+*.js linguist-vendored=true
+*.jsx linguist-vendored=true
