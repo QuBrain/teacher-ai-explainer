@@ -1,5 +1,5 @@
 // Main application component — manages the ReactFlow graph, WebSocket connection,
-// d3-force physics layout, conversation history, and user input.
+// tree-based layout, conversation history, and user input.
 import { useEffect, useState, useRef } from "react";
 import {
   ReactFlow,
@@ -11,25 +11,21 @@ import {
   Controls,
   MarkerType,
   useReactFlow,
+  useNodesInitialized,
   ReactFlowProvider,
   type Node,
 } from "@xyflow/react";
-import { forceSimulation, forceManyBody, forceCollide, forceX, forceY, type SimulationNodeDatum } from "d3-force";
 import MathNode from "./MathNode";
+import { getLayoutedElements, getGraphExtent } from "./layoutGraph";
 import "@xyflow/react/dist/style.css";
 import type { ReasoningNode, HistoryEntry } from "./types";
-
-interface D3Node extends SimulationNodeDatum {
-  id: string;
-  x: number;
-  y: number;
-}
 
 const nodeTypes = { mathNode: MathNode } as const;
 
 function FlowBoard() {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+  const [translateExtent, setTranslateExtent] = useState<[[number, number], [number, number]]>([[-1000, -1000], [5000, 5000]]);
 
   const [input, setInput] = useState("");
   const [isThinking, setIsThinking] = useState(false);
@@ -38,7 +34,8 @@ function FlowBoard() {
   const [editText, setEditText] = useState("");
   const socketRef = useRef<WebSocket | null>(null);
 
-  const { setCenter } = useReactFlow();
+  const { setCenter, fitView } = useReactFlow();
+  const nodesInitialized = useNodesInitialized();
 
   const nodeCount = nodes.length;
   const hasFinalAnswer = nodes.some((n) => (n.data as Record<string, unknown>).type === "FINAL ANSWER");
@@ -79,10 +76,10 @@ function FlowBoard() {
     }
   };
 
-  const makeNode = (data: ReasoningNode, position: { x: number; y: number }): Node => ({
+  const makeNode = (data: ReasoningNode): Node => ({
     id: String(data.id),
     type: "mathNode",
-    position,
+    position: { x: 0, y: 0 },
     data: {
       label: data.label,
       math: data.content || "",
@@ -91,24 +88,30 @@ function FlowBoard() {
     },
   });
 
+  // Re-layout with dagre whenever the graph changes and nodes have been measured.
   useEffect(() => {
+    if (!nodesInitialized) return;
     if (nodes.length === 0) return;
-    const simNodes = nodes as unknown as D3Node[];
-    const sim = forceSimulation(simNodes)
-      .force("charge", forceManyBody().strength(-150))
-      .force("collision", forceCollide().radius(300))
-      .force("y", forceY(window.innerHeight / 2).strength(0.8))
-      .force("x", forceX(window.innerWidth / 2).strength(0.02))
-      .velocityDecay(0.6)
-      .alpha(0.1)
-      .on("tick", () => {
-        setNodes((nds) =>
-          nds.map((node) => ({ ...node, position: { x: (node as unknown as D3Node).x, y: (node as unknown as D3Node).y } }))
-        );
-      });
-    return () => { sim.stop(); };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [nodes.length, setNodes]);
+
+    const layouted = getLayoutedElements(nodes, edges, {
+      rankdir: "LR",
+      nodesep: 80,
+      ranksep: 200,
+      edgesep: 40,
+    });
+
+    setNodes((current) =>
+      current.map((n) => {
+        const ln = layouted.find((l) => l.id === n.id);
+        return ln ? { ...n, position: ln.position } : n;
+      })
+    );
+
+    setTranslateExtent(getGraphExtent(layouted));
+    fitView({ padding: 0.2, duration: 800 });
+    // Only re-run when the count of nodes/edges changes, not every position update.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [nodesInitialized, nodes.length, edges.length, setNodes, fitView]);
 
   useEffect(() => {
     const ws = new WebSocket("wss://professor-backend-656601378878.us-central1.run.app/ws/reason");
@@ -124,15 +127,7 @@ function FlowBoard() {
 
       setIsThinking(false);
 
-      setNodes((nds) => {
-        const parentNode = nds.find((n) => String(n.id) === String(data.parent_id));
-        const isAlternative = data.node_type === "Alternative";
-        const position = {
-          x: parentNode ? parentNode.position.x + (isAlternative ? 0 : 550) : 100,
-          y: parentNode ? parentNode.position.y + (isAlternative ? 220 : 0) : window.innerHeight / 2,
-        };
-        return nds.concat(makeNode(data, position));
-      });
+      setNodes((nds) => nds.concat(makeNode(data)));
 
       if (data.parent_id) {
         setEdges((eds) =>
@@ -140,7 +135,7 @@ function FlowBoard() {
             id: `e-${data.parent_id}-${data.id}`,
             source: String(data.parent_id),
             target: String(data.id),
-            type: "straight",
+            type: "smoothstep",
             animated: true,
             style: { stroke: "#3b82f6", strokeWidth: 3 },
             markerEnd: { type: MarkerType.ArrowClosed, color: "#3b82f6" },
@@ -187,7 +182,7 @@ function FlowBoard() {
         onEdgesChange={onEdgesChange}
         minZoom={0.2}
         maxZoom={1.5}
-        translateExtent={[[-1000, -1000], [5000, 5000]]}
+        translateExtent={translateExtent}
         fitView={false}
       >
         <Background variant={BackgroundVariant.Dots} gap={20} color="#e2e8f0" />
