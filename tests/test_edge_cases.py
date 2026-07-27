@@ -1,8 +1,10 @@
 # Edge case tests — concurrent connections, large graph sequences, and extreme conditions.
 
 import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 from fastapi.testclient import TestClient
+
 from teacher_ai.standalone import app
 
 

@@ -1,8 +1,10 @@
 # Adversarial tests — security boundaries: injection, XSS, large payloads, malformed input.
 
 import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 from fastapi.testclient import TestClient
+
 from teacher_ai.standalone import app
 
 

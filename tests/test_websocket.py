@@ -2,8 +2,10 @@
 Uses mocked LiteLLM to avoid real API calls."""
 
 import json
-from unittest.mock import patch, MagicMock
+from unittest.mock import MagicMock, patch
+
 from fastapi.testclient import TestClient
+
 from teacher_ai.standalone import app
 
 
@@ -67,7 +69,7 @@ def test_websocket_sends_node_on_query(mock_completion):
 
 @patch("teacher_ai.standalone.completion")
 def test_websocket_probe_returns_alternative(mock_completion):
-    """Send a probe request and verify the server forces node_type to Alternative with correct parent_id."""
+    """Send a probe — server forces node_type to Alternative with correct parent_id."""
     mock_response = MagicMock()
     mock_response.choices = [
         MagicMock(
