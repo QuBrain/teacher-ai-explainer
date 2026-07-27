@@ -1,3 +1,4 @@
+// ESLint flat config — lints TypeScript/React files with hooks and HMR rules
 import js from "@eslint/js";
 import globals from "globals";
 import reactHooks from "eslint-plugin-react-hooks";

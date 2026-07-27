@@ -1,3 +1,6 @@
+# FastAPI server that connects Gemini (Vertex AI) to a real-time whiteboard via WebSocket.
+# Receives STEM questions, streams reasoning nodes back as the model generates them.
+
 import asyncio
 import json
 import os
@@ -8,6 +11,8 @@ from google import genai
 from google.genai import types
 
 app = FastAPI()
+
+# Allow the Vite dev server and Firebase-hosted frontends to connect
 origins = [
     "http://localhost:5173",
     "https://cs598-project-492002.web.app",
@@ -15,20 +20,22 @@ origins = [
 ]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins,  # For a prototype, "*" is fine. For production, use your Vercel/Firebase URL.  # noqa: E501
+    allow_origins=origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
 
-project_id=os.environ.get("GOOGLE_CLOUD_PROJECT")
-location_id=os.environ.get("GOOGLE_CLOUD_LOCATION","us-central1")
+# Authenticate with Vertex AI using GCP project/location env vars
+project_id = os.environ.get("GOOGLE_CLOUD_PROJECT")
+location_id = os.environ.get("GOOGLE_CLOUD_LOCATION", "us-central1")
 
 if project_id and location_id:
-    client = genai.Client(vertexai=True,project=project_id,location=location_id)
+    client = genai.Client(vertexai=True, project=project_id, location=location_id)
 else:
-    raise ValueError
+    raise ValueError("GOOGLE_CLOUD_PROJECT and GOOGLE_CLOUD_LOCATION must be set")
 
+# Declare the function-calling tool that Gemini uses to add nodes to the graph
 node_tool = types.Tool(
     function_declarations=[
         types.FunctionDeclaration(
@@ -70,7 +77,8 @@ async def websocket_endpoint(websocket: WebSocket):
         while True:
             raw = await websocket.receive_text()
 
-            # --- Route: probe vs regular query ---
+            # Determine if this is a probe request (asking for alternative explanation)
+            # or a regular question
             try:
                 msg = json.loads(raw)
                 is_probe = msg.get("type") == "probe"
@@ -91,7 +99,7 @@ async def websocket_endpoint(websocket: WebSocket):
             else:
                 student_query = raw
 
-            # --- Fresh chat session per query/probe ---
+            # Start a fresh Gemini chat session for each query
             chat = client.chats.create(
                 model='gemini-2.5-pro',
                 config=types.GenerateContentConfig(
@@ -103,6 +111,8 @@ async def websocket_endpoint(websocket: WebSocket):
 
             response = chat.send_message(student_query)
 
+            # Loop through Gemini's function calls, sending each node to the frontend
+            # with a 1.2s delay so the graph builds incrementally
             while True:
                 found_tool_call = False
 
@@ -111,8 +121,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         found_tool_call = True
                         node_data = dict(part.function_call.args)
 
-                        # For probes, force the correct parent_id and type
-                        # in case the model ignores the instruction
+                        # Override probe responses to ensure correct structure
                         if is_probe:
                             node_data["node_type"] = "Alternative"
                             node_data["parent_id"] = parent_id
@@ -121,6 +130,7 @@ async def websocket_endpoint(websocket: WebSocket):
                         await websocket.send_json(node_data)
                         print(f"Node sent: {node_data.get('label')} [{node_data.get('node_type')}]")
 
+                        # Tell Gemini the node was rendered so it can continue
                         response = chat.send_message(
                             types.Part.from_function_response(
                                 name="add_reasoning_node",

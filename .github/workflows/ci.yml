@@ -1,3 +1,4 @@
+# CI pipeline — runs on push/PR to main: lint, type check, test, build
 name: CI
 
 on:
@@ -66,6 +67,9 @@ jobs:
 
       - name: Type check (tsc)
         run: npx tsc --noEmit
+
+      - name: Test (vitest)
+        run: npx vitest run
 
       - name: Build
         run: npm run build

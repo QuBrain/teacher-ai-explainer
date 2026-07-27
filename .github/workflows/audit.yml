@@ -1,3 +1,4 @@
+# Security audit — runs weekly (Sunday) and on PRs: dependency scan, SAST, secrets detection
 name: Security Audit
 
 on:

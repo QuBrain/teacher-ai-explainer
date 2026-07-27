@@ -1,3 +1,8 @@
+"""Smoke test — verifies the FastAPI app imports and initializes correctly."""
+
+from main import app
+
+
 def test_imports():
-    from main import app
+    """Verify the FastAPI application object can be imported without errors."""
     assert app.title == "FastAPI"

@@ -6,8 +6,9 @@ Two independent sub-projects, **not** a monorepo:
 
 | Layer | Location | Entrypoint | Tech |
 |-------|----------|------------|------|
-| Backend | `/` (root) | `main.py` | FastAPI + WebSocket + Gemini 2.5 Pro (Vertex AI) |
-| Frontend | `whiteboard-dashboard/` | `src/main.jsx` | React 19 + Vite + ReactFlow + d3-force |
+| Backend | `/` (root) | `main.py` (legacy), `teacher_ai.py` (new) | FastAPI + WebSocket + LiteLLM |
+| Backend package | `teacher_ai/` | `standalone.py` | LiteLLM, FastAPI |
+| Frontend | `whiteboard-dashboard/` | `src/main.tsx` | React 19 + Vite + ReactFlow + d3-force |
 
 ## Commands
 
@@ -16,15 +17,17 @@ Two independent sub-projects, **not** a monorepo:
 npm run dev      # Vite dev server (localhost:5173)
 npm run build    # Vite build → dist/
 npm run lint     # ESLint v9 (flat config)
+npm run typecheck # tsc --noEmit
 npm run preview  # Vite preview
 ```
 
 ### Backend (root)
 ```sh
-uvicorn main:app --reload          # dev server
-docker build -t teacher-ai . && docker run -p 8080:8080 teacher-ai   # Docker
-pytest tests/ -v                   # run backend tests
-ruff check .                       # lint backend
+python teacher_ai.py                  # standalone mode (default, LiteLLM + WebSocket)
+python teacher_ai.py --mode mcp       # MCP mode (not yet implemented)
+uvicorn main:app --reload             # legacy dev server (Vertex AI)
+pytest tests/ -v                      # run backend tests
+ruff check .                          # lint backend
 ```
 
 ### CI/CD
@@ -34,23 +37,17 @@ GitHub Actions workflows in `.github/workflows/`:
 
 ## Critical gotchas
 
-- **WebSocket URL is hardcoded** in `App.jsx:93` to a Cloud Run deployment. No env var or local fallback. For local dev, change this to `ws://localhost:8000/ws/reason`.
-- **`requirements.txt` is bloated** (298 packages, many unused like torch, transformers, langchain, etc.).
-- **No `.env` files.** Backend requires `GOOGLE_CLOUD_PROJECT` and `GOOGLE_CLOUD_LOCATION` (default: `us-central1`).
+- **WebSocket URL is hardcoded** in `App.tsx:96` to a Cloud Run deployment. For local dev, change to `ws://localhost:8000/ws/reason`.
+- **No `.env` files.** Backend requires `GOOGLE_CLOUD_PROJECT` + `GOOGLE_CLOUD_LOCATION` for legacy `main.py`, or `LLM_PROVIDER` + `LLM_API_KEY` for `teacher_ai.py`.
 - **Tailwind v4** is in devDeps but has no config and is not imported in CSS — likely unused.
 - **`.gitignore`** has Next.js entries (`/.next/`, `/out/`) — stale from template.
-- **No formatter config** (black is in requirements.txt but unconfigured).
 - **Root `package.json` is stale** — only exists for hoisted deps. Real frontend is in `whiteboard-dashboard/`.
 
 ## Architecture
 
-- Backend: Single WebSocket endpoint `/ws/reason`. Reads `System_Prompt.md` for Gemini system instructions. Fresh chat session per query. Gemini calls `add_reasoning_node` tool; backend forwards node data over WebSocket with 1.2s delay between nodes.
+- **Dual-mode entrypoint:** `teacher_ai.py --mode standalone|mcp` (default: standalone).
+- **Standalone mode** (`teacher_ai/standalone.py`): FastAPI + WebSocket + LiteLLM. Calls any LLM provider via `LLM_PROVIDER` env var (e.g. `gemini/gemini-2.5-pro`, `openai/gpt-4o`, `anthropic/claude-sonnet-4-20250514`, `ollama/llama3.1`). LiteLLM telemetry disabled by default.
+- **Legacy mode** (`main.py`): FastAPI + Vertex AI Gemini. Requires GCP project/location env vars.
 - Frontend: `FlowBoard` component manages ReactFlow graph + d3-force layout + WebSocket client + conversation history sidebar. Custom node type `mathNode` renders KaTeX via `react-markdown` + `remark-math` + `rehype-katex`.
 - Node types: `Given`, `Objective`, `Principle`, `Derivation`, `Self-Correction`, `Alternative`, `Final Answer`.
 - Probe feature: clicking `?` on a node sends `{"type":"probe","parent_id":"...","content":"..."}` to get an alternative explanation.
-
-## Deployment
-
-- Backend: Docker → Google Cloud Run (port from `$PORT`, default 8080).
-- Frontend: `npm run build` → Firebase hosting (`.firebaserc` configured).
-- CORS in `main.py` allows `localhost:5173` and two Firebase domains.

@@ -1,3 +1,5 @@
+// Main application component — manages the ReactFlow graph, WebSocket connection,
+// d3-force physics layout, conversation history, and user input.
 import { useEffect, useState, useRef } from "react";
 import {
   ReactFlow,
@@ -28,18 +30,18 @@ const nodeTypes = { mathNode: MathNode } as const;
 function FlowBoard() {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
+
   const [input, setInput] = useState("");
   const [isThinking, setIsThinking] = useState(false);
   const [history, setHistory] = useState<HistoryEntry[]>([]);
-  const [activePromptId, setActivePromptId] = useState<number | null>(null);
-  const activeIdRef = useRef<number | null>(null);
+  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editText, setEditText] = useState("");
   const socketRef = useRef<WebSocket | null>(null);
 
   const { setCenter } = useReactFlow();
 
-  const currentNodes = nodes.filter((n) => (n.data as Record<string, unknown>).promptId === activePromptId);
-  const nodeCount = currentNodes.length;
-  const hasFinalAnswer = currentNodes.some((n) => (n.data as Record<string, unknown>).type === "FINAL ANSWER");
+  const nodeCount = nodes.length;
+  const hasFinalAnswer = nodes.some((n) => (n.data as Record<string, unknown>).type === "FINAL ANSWER");
   const progressPercentage = hasFinalAnswer
     ? 100
     : Math.min((nodeCount / (nodeCount + 2)) * 100, 95);
@@ -60,7 +62,24 @@ function FlowBoard() {
     }
   });
 
-  const makeNode = (data: ReasoningNode, position: { x: number; y: number }, promptId: number): Node => ({
+  const handleCancel = () => {
+    const ws = socketRef.current;
+    if (ws?.readyState === WebSocket.OPEN) {
+      ws.send(JSON.stringify({ type: "cancel" }));
+      setIsThinking(false);
+    }
+  };
+
+  const handleResend = (text: string) => {
+    const ws = socketRef.current;
+    if (ws?.readyState === WebSocket.OPEN && text.trim()) {
+      setEditingId(null);
+      setIsThinking(true);
+      ws.send(text);
+    }
+  };
+
+  const makeNode = (data: ReasoningNode, position: { x: number; y: number }): Node => ({
     id: String(data.id),
     type: "mathNode",
     position,
@@ -68,7 +87,6 @@ function FlowBoard() {
       label: data.label,
       math: data.content || "",
       type: data.node_type,
-      promptId,
       onProbe: (nodeId: string, nodeContent: string) => handleProbe.current(nodeId, nodeContent),
     },
   });
@@ -97,9 +115,14 @@ function FlowBoard() {
     socketRef.current = ws;
 
     ws.onmessage = (event: MessageEvent) => {
+      const data = JSON.parse(event.data);
+
+      if (data.type === "cancelled") {
+        setIsThinking(false);
+        return;
+      }
+
       setIsThinking(false);
-      const data: ReasoningNode = JSON.parse(event.data);
-      const currentPromptId = activeIdRef.current;
 
       setNodes((nds) => {
         const parentNode = nds.find((n) => String(n.id) === String(data.parent_id));
@@ -108,7 +131,7 @@ function FlowBoard() {
           x: parentNode ? parentNode.position.x + (isAlternative ? 0 : 550) : 100,
           y: parentNode ? parentNode.position.y + (isAlternative ? 220 : 0) : window.innerHeight / 2,
         };
-        return nds.concat(makeNode(data, position, currentPromptId!));
+        return nds.concat(makeNode(data, position));
       });
 
       if (data.parent_id) {
@@ -121,7 +144,6 @@ function FlowBoard() {
             animated: true,
             style: { stroke: "#3b82f6", strokeWidth: 3 },
             markerEnd: { type: MarkerType.ArrowClosed, color: "#3b82f6" },
-            data: { promptId: activeIdRef.current },
           }, eds)
         );
       }
@@ -133,10 +155,7 @@ function FlowBoard() {
   const handleSend = () => {
     const ws = socketRef.current;
     if (ws?.readyState === WebSocket.OPEN && input.trim()) {
-      const newId = Date.now();
-      activeIdRef.current = newId;
-      setHistory((prev) => [{ text: input, id: newId }, ...prev]);
-      setActivePromptId(newId);
+      setHistory((prev) => [{ text: input, id: Date.now() }, ...prev]);
       setIsThinking(true);
       ws.send(input);
       setInput("");
@@ -154,15 +173,15 @@ function FlowBoard() {
         <span style={{ fontSize: "12px", fontWeight: "bold", color: "#64748b" }}>GO TO:</span>
         <select onChange={(e) => handleJumpToStep(e.target.value)} style={{ border: "none", background: "#f1f5f9", borderRadius: "6px", padding: "4px 8px", fontSize: "12px", fontWeight: "bold", color: "#1e293b", outline: "none", cursor: "pointer" }}>
           <option value="">Step {nodeCount}</option>
-          {currentNodes.map((node, index) => (
-            <option key={node.id} value={node.id}>            {index + 1}: {String((node.data as Record<string, unknown>).type || "Logic")}</option>
+          {nodes.map((node, index) => (
+            <option key={node.id} value={node.id}>{index + 1}: {String((node.data as Record<string, unknown>).type || "Logic")}</option>
           ))}
         </select>
       </div>
 
       <ReactFlow
-        nodes={currentNodes}
-        edges={edges.filter((e) => (e.data as Record<string, unknown>)?.promptId === activePromptId)}
+        nodes={nodes}
+        edges={edges}
         nodeTypes={nodeTypes}
         onNodesChange={onNodesChange}
         onEdgesChange={onEdgesChange}
@@ -178,8 +197,36 @@ function FlowBoard() {
       <div style={{ position: "absolute", left: "20px", top: "20px", width: "280px", maxHeight: "70vh", background: "rgba(255,255,255,0.9)", backdropFilter: "blur(10px)", borderRadius: "16px", padding: "20px", boxShadow: "0 10px 15px rgba(0,0,0,0.1)", border: "1px solid rgba(226,232,240,0.8)", zIndex: 10000, overflowY: "auto", display: "flex", flexDirection: "column", gap: "12px" }}>
         <div style={{ fontSize: "11px", fontWeight: "800", color: "#94a3b8", textTransform: "uppercase", letterSpacing: "1px" }}>Conversation History</div>
         {history.map((item) => (
-          <div key={item.id} onClick={() => { setActivePromptId(item.id); activeIdRef.current = item.id; }} style={{ padding: "12px", borderRadius: "8px", fontSize: "14px", cursor: "pointer", background: activePromptId === item.id ? "#eff6ff" : "white", border: activePromptId === item.id ? "2px solid #3b82f6" : "1px solid #f1f5f9" }}>
-            {item.text.substring(0, 40)}{item.text.length > 40 ? "..." : ""}
+          <div key={item.id} style={{ padding: "12px", borderRadius: "8px", fontSize: "14px", background: "white", border: "1px solid #f1f5f9" }}>
+            {editingId === item.id ? (
+              <div style={{ display: "flex", flexDirection: "column", gap: "6px" }}>
+                <input
+                  type="text"
+                  value={editText}
+                  onChange={(e) => setEditText(e.target.value)}
+                  onKeyDown={(e) => e.key === "Enter" && handleResend(editText)}
+                  style={{ padding: "6px", borderRadius: "4px", border: "1px solid #cbd5e1", fontSize: "13px" }}
+                  autoFocus
+                />
+                <div style={{ display: "flex", gap: "6px" }}>
+                  <button onClick={() => handleResend(editText)} style={{ padding: "4px 10px", background: "#059669", color: "white", border: "none", borderRadius: "4px", fontSize: "11px", cursor: "pointer" }}>Send</button>
+                  <button onClick={() => setEditingId(null)} style={{ padding: "4px 10px", background: "#e2e8f0", color: "#475569", border: "none", borderRadius: "4px", fontSize: "11px", cursor: "pointer" }}>Cancel</button>
+                </div>
+              </div>
+            ) : (
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: "6px" }}>
+                <span style={{ flex: 1, cursor: "pointer" }} onClick={() => { setEditingId(item.id); setEditText(item.text); }}>
+                  {item.text.substring(0, 40)}{item.text.length > 40 ? "..." : ""}
+                </span>
+                <button
+                  onClick={() => handleResend(item.text)}
+                  title="Resend"
+                  style={{ background: "none", border: "none", color: "#3b82f6", cursor: "pointer", fontSize: "14px", padding: "2px" }}
+                >
+                  ↩
+                </button>
+              </div>
+            )}
           </div>
         ))}
       </div>
@@ -188,6 +235,12 @@ function FlowBoard() {
         <div style={{ position: "absolute", bottom: "140px", left: "50%", transform: "translateX(-50%)", background: "white", padding: "12px 24px", borderRadius: "24px", boxShadow: "0 4px 12px rgba(0,0,0,0.1)", zIndex: 20000, display: "flex", alignItems: "center", gap: "10px" }}>
           <div className="spinner" />
           <span style={{ fontSize: "14px", fontWeight: "600", color: "#64748b" }}>Professor is thinking...</span>
+          <button
+            onClick={handleCancel}
+            style={{ padding: "6px 14px", background: "#ef4444", color: "white", border: "none", borderRadius: "12px", fontSize: "12px", fontWeight: "bold", cursor: "pointer" }}
+          >
+            Stop
+          </button>
         </div>
       )}
 

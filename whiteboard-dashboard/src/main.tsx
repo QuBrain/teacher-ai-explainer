@@ -1,3 +1,4 @@
+// Entry point — mounts the React app into the DOM
 import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import "./index.css";
