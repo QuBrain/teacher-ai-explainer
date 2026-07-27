@@ -19,7 +19,6 @@ const nodeTypes = { mathNode: MathNode };
 function FlowBoard() {
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
-  const [socket, setSocket] = useState(null);
   const [input, setInput] = useState("");
   const [isThinking, setIsThinking] = useState(false);
   const [history, setHistory] = useState([]);
@@ -92,7 +91,6 @@ function FlowBoard() {
   useEffect(() => {
     const ws = new WebSocket("wss://professor-backend-656601378878.us-central1.run.app/ws/reason");
     socketRef.current = ws;
-    setSocket(ws);
 
     ws.onmessage = (event) => {
       setIsThinking(false);

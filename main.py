@@ -1,10 +1,11 @@
 import asyncio
 import json
+import os
+
 from fastapi import FastAPI, WebSocket
+from fastapi.middleware.cors import CORSMiddleware
 from google import genai
 from google.genai import types
-from fastapi.middleware.cors import CORSMiddleware
-import os
 
 app = FastAPI()
 origins = [
@@ -14,7 +15,7 @@ origins = [
 ]
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=origins, # For a prototype, "*" is fine. For production, use your Vercel/Firebase URL.
+    allow_origins=origins,  # For a prototype, "*" is fine. For production, use your Vercel/Firebase URL.  # noqa: E501
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -123,7 +124,10 @@ async def websocket_endpoint(websocket: WebSocket):
                         response = chat.send_message(
                             types.Part.from_function_response(
                                 name="add_reasoning_node",
-                                response={"status": "success", "message": "Node rendered on whiteboard"}
+                                response={
+                                    "status": "success",
+                                    "message": "Node rendered on whiteboard"
+                                }
                             )
                         )
 

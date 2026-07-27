@@ -44,7 +44,7 @@ const MathNode = ({ id, data }) => {
           remarkPlugins={[remarkMath]}
           rehypePlugins={[rehypeKatex]}
           components={{
-            p: ({ node, ...props }) => (
+            p: (props) => (
               <p style={{ margin: 0, fontSize: '14px', lineHeight: '1.5', color: '#1e293b' }} {...props} />
             ),
           }}
